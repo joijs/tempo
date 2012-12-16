@@ -1,6 +1,6 @@
 joi tempo
 =====
-*A next-generation framework for ECMAScript 5, built for modern browsers and server environments.*
+*Developing a next-generation framework for ECMAScript 5, built for modern browsers and server environments.*
 
 **tempo** serves two purposes:
 
