@@ -23,4 +23,4 @@ tempo serves two purposes:
 
 tempo and its sub-projects are released under the [MIT license](https://github.com/joijs/tempo/blob/master/LICENSE.md).
 
-tempo is developed and maintained by Nathan Wall
+Developed and maintained by Nathan Wall
