@@ -13,7 +13,7 @@ tempo serves two purposes:
 
 ### ECMAScript 5
 
-*tempo is targeted toward ECMAScript 5.* Most of the sub-projects are intended to be host environment agnostic, meaning that they should run just as well on a server as in a browser, as long as it is an ES5 environment. However, there are also plans to a develop DOM-related project as a part of tempo targeted more specifically toward the browser.
+*tempo is targeted toward ECMAScript 5.* Most of the sub-projects are intended to be host environment agnostic, meaning that they should run just as well on a server as in a browser, as long as it is an ES5 environment. However, there are also plans to develop a DOM-related project as a part of tempo targeted more specifically toward the browser.
 
 ### ECMAScript 6
 
