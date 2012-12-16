@@ -1,4 +1,4 @@
 tempo
 =====
 
-A modern JavaScript library.
+A next generation framework for modern browsers for ECMAScript 5.
