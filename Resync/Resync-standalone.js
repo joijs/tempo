@@ -130,9 +130,9 @@ var Resync = (function(Object, String, TypeError, RangeError, Error) {
 								+ 'return (function " + name + "_(' + join(args, ',') + ') {'
 									+ 'return apply(wrapF, this, arguments);'
 								+ '});'
-							+ '})");'
+							+ '})")(wrapF, original, name, apply);'
 							+ 'wrapper.original = original;'
-							+ 'return wrapper(wrapF, original, name, apply);'
+							+ 'return wrapper;'
 						+ '})'
 					);
 
@@ -354,13 +354,14 @@ if (typeof module == 'object' && module != null
 		keys = Object.keys,
 		getOwnPropertyNames = Object.getOwnPropertyNames,
 		getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor,
-		defineProperty = Object.defineProperty,
+		_defineProperty = Object.defineProperty,
 		hasOwn = lazyBind(Object.prototype.hasOwnProperty),
 		push = lazyBind(Array.prototype.push),
 		forEach = lazyBind(Array.prototype.forEach),
 		map = lazyBind(Array.prototype.map),
-		filter = lazyBind(Array.prototype.filter),
 		join = lazyBind(Array.prototype.join),
+		splice = lazyBind(Array.prototype.splice),
+		ArrayIndexOf = lazyBind(Array.prototype.indexOf),
 		fromCharCode = String.fromCharCode,
 		apply = lazyBind(Function.prototype.apply),
 		bind = lazyBind(Function.prototype.bind),
@@ -382,7 +383,13 @@ if (typeof module == 'object' && module != null
 		MIN_PRECISION = -Math.pow(2, 53),
 		MAX_PRECISION = -MIN_PRECISION,
 		// idNum will ensure identifiers are unique.
-		idNum = [ MIN_PRECISION ],
+		idNum = (function() {
+			// Use an Array-like rather than a true array to protect against setters defined on Array.prototype indices.
+			var idNum = create(null);
+			idNum[0] = MIN_PRECISION;
+			idNum.length = 1;
+			return idNum;
+		})(),
 		preIdentifier = randStr(7) + '0',
 		SECRET_KEY = '!S:' + getIdentifier(),
 
@@ -405,11 +412,15 @@ if (typeof module == 'object' && module != null
 
 		keys(overrides).forEach(function(u) {
 			var original = overrides[u];
-			defineProperty(Object, u, {
+			_defineProperty(Object, u, {
 				value: function(obj) {
-					return filter(apply(original, this, arguments), function(u) {
-						return u != SECRET_KEY;
-					});
+					var names = apply(original, this, arguments);
+					if (u === 'getOwnPropertyNames' && !hasOwn(obj, SECRET_KEY))
+						return names;
+					var index = ArrayIndexOf(names, SECRET_KEY);
+					if (~index)
+						splice(names, index, 1);
+					return names;
 				},
 				enumerable: false,
 				writable: true,
@@ -424,7 +435,7 @@ if (typeof module == 'object' && module != null
 
 		keys(overrides).forEach(function(u) {
 			var original = overrides[u];
-			defineProperty(Object, u, {
+			_defineProperty(Object, u, {
 				value: function(obj) {
 					var desc = apply(original, this, arguments);
 					delete desc[SECRET_KEY];
@@ -441,7 +452,7 @@ if (typeof module == 'object' && module != null
 	// Override functions which prevent extensions on objects to go ahead and add a secret map first.
 	[ 'preventExtensions', 'seal', 'freeze' ].forEach(function(u) {
 		var original = Object[u];
-		defineProperty(Object, u, {
+		_defineProperty(Object, u, {
 			value: function(obj) {
 				// Define the secret map.
 				Secrets(obj);
@@ -459,7 +470,7 @@ if (typeof module == 'object' && module != null
 			 */
 
 			var trapBypasses = create(null);
-			trapBypasses.defineProperty = defineProperty;
+			trapBypasses.defineProperty = _defineProperty;
 			trapBypasses.hasOwn = hasOwn;
 			trapBypasses.get = function(target, name) { return target[name]; };
 
@@ -536,15 +547,16 @@ if (typeof module == 'object' && module != null
 		// really only happen if an object is passed in from another frame, because in this frame preventExtensions
 		// is overridden to add a Secrets property first.
 
-		if (O !== Object(O)) throw new Error('Not an object: ' + O);
+		if (O !== Object(O))
+			throw new Error('Not an object: ' + O);
+
 		if (!hasOwn(O, SECRET_KEY)) {
 			if (!isExtensible(O)) return;
-			defineProperty(O, SECRET_KEY, own({
+			defineProperty(O, SECRET_KEY, {
 
 				get: (function() {
 					var secretMap = create(null);
 					return function getSecret() {
-						var value;
 						// The lock protects against retrieval in the event that the SECRET_KEY is discovered.
 						if (locked) return;
 						locked = true;
@@ -555,10 +567,10 @@ if (typeof module == 'object' && module != null
 				enumerable: false,
 				configurable: false
 
-			}));
+			});
 		}
-		locked = false;
-		
+
+		locked = false;	
 		return O[SECRET_KEY];
 
 	}
@@ -587,7 +599,8 @@ if (typeof module == 'object' && module != null
 	}
 
 	function getRandStrs(count, length) {
-		var r = [ ];
+		var r = create(null);
+		r.length = 0;
 		for(var i = 0; i < count; i++) {
 			push(r, randStr(length));
 		}
@@ -631,17 +644,25 @@ if (typeof module == 'object' && module != null
 		} else return Math.random;
 	}
 
-	function own(obj) {
+	// We only want to define with own properties of the descriptor.
+	function defineProperty(obj, name, desc) {
+		if ('value' in desc && !hasOwn(desc, 'value')
+			|| 'get' in desc && !hasOwn(desc, 'get')
+			|| 'set' in desc && !hasOwn(desc, 'set')
+			|| 'writable' in desc && !hasOwn(desc, 'writable'))
+			desc = safeDescriptor(desc);
+		return _defineProperty(obj, name, desc);
+	}
 
-		var O = create(null);
-
-		forEach(getOwnPropertyNames(obj), function(key) {
-			defineProperty(O, key,
-				getOwnPropertyDescriptor(obj, key));
-		});
-
+	function safeDescriptor(obj) {
+		if (obj == null)
+			throw new TypeError('Argument cannot be null or undefined.');
+		obj = Object(obj);
+		var O = create(null),
+			k = keys(obj);
+		for (var i = 0, key = k[i]; key = k[i], i < k.length; i++)
+			O[key] = obj[key];
 		return O;
-
 	}
 
 // We pass in Object and String to ensure that they cannot be changed later to something else.
@@ -4362,20 +4383,37 @@ var candy = (function(SecretExports, Object, Array, Function, String, Number, Ty
  	// of memory & performance enhancements which are possible without direct eval.
 	_eval = eval,
 
-	// The following are for internal use. They're needed to get lazyBind off the ground.
-	_apply = Function.prototype.call.bind(Function.prototype.apply),
-	_ArraySlice = Function.prototype.call.bind(Array.prototype.slice),
-	_concat = Function.prototype.call.bind(Array.prototype.concat),
-	_push = Function.prototype.call.bind(Array.prototype.push),
-	_join = Function.prototype.call.bind(Array.prototype.join),
-	_replace = Function.prototype.call.bind(String.prototype.replace),
-	_forEach = Function.prototype.call.bind(Array.prototype.forEach),
+	// An internal-use-only lazyBind for improved performance. Note: Do not use this function to lazyBind
+	// functions which will be exposed externally, as it won't set the `length` of the lazyBound function
+	// correctly. Instead use regular `lazyBind` (without the underscore prefix).
+	_lazyBind = Function.prototype.bind.bind(Function.prototype.call),
 
+	// The following are for internal use. They're needed to get lazyBind off the ground.
+	_apply = _lazyBind(Function.prototype.apply),
+	_ArraySlice = _lazyBind(Array.prototype.slice),
+	_concat = _lazyBind(Array.prototype.concat),
+	_push = _lazyBind(Array.prototype.push),
+	_join = _lazyBind(Array.prototype.join),
+	_replace = _lazyBind(String.prototype.replace),
+	_forEach = _lazyBind(Array.prototype.forEach),
+	_filter = _lazyBind(Array.prototype.filter),
+	_map = _lazyBind(Array.prototype.map),
+
+	protoIsMutable = (function() {
+		// TODO: Keep up-to-date with whether ES6 goes with __proto__ or Reflect.setPrototypeOf.
+		var A = Object.create(null),
+			A2 = Object.create(null),
+			B = Object.create(A);
+		B.__proto__ = A2;
+		return Object.getPrototypeOf(B) === A2;
+	})(),
+
+	// TODO: Use _lazyBind when possible.
 	is = Object.is,
 	create = Object.create,
 	getPrototypeOf = Object.getPrototypeOf,
-	isPrototypeOf = lazyBind(Object.prototype.isPrototypeOf),
-	ToString = lazyBind(Object.prototype.toString),
+	isPrototypeOf = _lazyBind(Object.prototype.isPrototypeOf),
+	ToString = _lazyBind(Object.prototype.toString),
 	keys = Object.keys,
 	getOwnPropertyNames = Object.getOwnPropertyNames,
 	_getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor,
@@ -4385,37 +4423,38 @@ var candy = (function(SecretExports, Object, Array, Function, String, Number, Ty
 	has = Reflect.has,
 	hasOwn = Reflect.hasOwn,
 
-	call = lazyBind(Function.prototype.call),
-	apply = lazyBind(Function.prototype.apply),
+	call = _lazyBind(Function.prototype.call),
+	apply = _lazyBind(Function.prototype.apply),
 
 	isArray = Array.isArray,
-	ArraySlice = lazyBind(Array.prototype.slice),
-	concat = lazyBind(Array.prototype.concat),
-	ArrayForEach = lazyBind(Array.prototype.forEach),
-	ArraySome = lazyBind(Array.prototype.some),
-	ArrayEvery = lazyBind(Array.prototype.every),
-	ArrayReduce = lazyBind(Array.prototype.reduce),
-	join = lazyBind(Array.prototype.join),
-	push = lazyBind(Array.prototype.push),
-	pop = lazyBind(Array.prototype.pop),
-	shift = lazyBind(Array.prototype.shift),
-	unshift = lazyBind(Array.prototype.unshift),
-	sort = lazyBind(Array.prototype.sort),
-	contains = lazyBind(Array.prototype.contains),
-	reverse = lazyBind(Array.prototype.reverse),
-	ArrayIterator = lazyBind($$(Array.prototype, 'iterator')),
+	ArraySlice = _lazyBind(Array.prototype.slice),
+	concat = _lazyBind(Array.prototype.concat),
+	// TODO: Many of these are duplicated in the underscore functions above (like _forEach). Remove this redundancy.
+	ArrayForEach = _lazyBind(Array.prototype.forEach),
+	ArraySome = _lazyBind(Array.prototype.some),
+	ArrayEvery = _lazyBind(Array.prototype.every),
+	ArrayReduce = _lazyBind(Array.prototype.reduce),
+	join = _lazyBind(Array.prototype.join),
+	push = _lazyBind(Array.prototype.push),
+	pop = _lazyBind(Array.prototype.pop),
+	shift = _lazyBind(Array.prototype.shift),
+	unshift = _lazyBind(Array.prototype.unshift),
+	sort = _lazyBind(Array.prototype.sort),
+	contains = _lazyBind(Array.prototype.contains),
+	reverse = _lazyBind(Array.prototype.reverse),
+	ArrayIterator = _lazyBind($$(Array.prototype, 'iterator')),
 
-	StringSlice = lazyBind(String.prototype.slice),
-	split = lazyBind(String.prototype.split),
-	replace = lazyBind(String.prototype.replace),
+	StringSlice = _lazyBind(String.prototype.slice),
+	split = _lazyBind(String.prototype.split),
+	replace = _lazyBind(String.prototype.replace),
 
 	random = Math.random,
 
-	WeakMapGet = lazyBind(WeakMap.prototype.get),
-	WeakMapSet = lazyBind(WeakMap.prototype.set),
+	WeakMapGet = _lazyBind(WeakMap.prototype.get),
+	WeakMapSet = _lazyBind(WeakMap.prototype.set),
 
 	// TODO: has might change to contains in upcoming draft
-	SetContains = lazyBind(Set.prototype.has),
+	SetContains = _lazyBind(Set.prototype.has),
 
 	_setTimeout = typeof setTimeout == 'function' ? setTimeout : undefined,
 	_clearTimeout = typeof clearTimeout == 'function' ? clearTimeout : undefined;
@@ -4449,7 +4488,7 @@ function methods(builtIn, staticO, instance) {
 
 			if (name == 'constructor') return;
 
-			var desc = getOwnPropertyDescriptor(obj, name),
+			var desc = _getOwnPropertyDescriptor(obj, name),
 				method = desc && desc.value;
 
 			if (typeof method == 'function') {
@@ -4485,7 +4524,7 @@ function methods(builtIn, staticO, instance) {
 
 			if (name == 'constructor') return;
 
-			var desc = getOwnPropertyDescriptor(staticO, name),
+			var desc = _getOwnPropertyDescriptor(staticO, name),
 				method = desc && desc.value;
 
 			if (typeof method == 'function')
@@ -4514,6 +4553,17 @@ function CallConstruct(withObj, onObj) {
 			onObj = constructed;
 	}
 	return onObj;
+}
+
+function safeDescriptor(obj) {
+	if (obj == null)
+		throw new TypeError('Argument cannot be null or undefined.');
+	obj = Object(obj);
+	var O = create(null),
+		k = keys(obj);
+	for (var i = 0, key = k[i]; key = k[i], i < k.length; i++)
+		O[key] = obj[key];
+	return O;
 }
 function isIterable(obj) {
 	var O = Object(obj);
@@ -4896,11 +4946,11 @@ function stableSort() {
 		_sort = lazyBind(R.sort),
 		_ArrayFrom = Array.from,
 		nativeIsStable = (function() {
-			return testStability(32, 2) && testStability(512, 16);
+			return testStability(28, 2) && testStability(48, 4);
 			function testStability(size, resolution) {
 				var res = createRange(resolution),
 					r = _map(createRange(size), function(u) {
-						return mixin(map(res, function() {
+						return mixin(_map(res, function() {
 							return random() > .5 ? 0 : 1;
 						}), { i: u });
 					});
@@ -5055,9 +5105,9 @@ function createWrapper(f/*, length = f.length */, wrapF) {
 						+ 'return (function " + name + "_(' + _join(args, ',') + ') {'
 							+ 'return apply(wrapF, this, arguments);'
 						+ '});'
-					+ '})");'
+					+ '})")(wrapF, original, name, apply);'
 					+ 'wrapper.original = original;'
-					+ 'return wrapper(wrapF, original, name, apply);'
+					+ 'return wrapper;'
 				+ '})'
 			);
 
@@ -5180,7 +5230,7 @@ function lazyBind(f/*, ...preArgs */) {
 
 	return lazyBound;
 
-};
+}
 
 function contextualize(f/*, ...preArgs */) {
 	// The opposite of lazyBind, this function returns a wrapper which calls f, passing the wrapper's context as
@@ -5587,6 +5637,7 @@ var _Number = (function() {
 
 })();
 // TODO: Use Spawn.mixin?
+// TODO: Rename to `mix` to avoid naming conflict with future ES `mixin`, since there may be a difference in the algorithms.
 function mixin(what/*, ...withs */) {
 
 	if (Object(what) != what)
@@ -5601,7 +5652,7 @@ function mixin(what/*, ...withs */) {
 
 		withO = Object(arguments[i]);
 
-		forEach(getUncommonPropertyNames(withO, what), function(name) {
+		_forEach(getUncommonPropertyNames(withO, what), function(name) {
 
 			var whatDesc = getPropertyDescriptor(what, name),
 				withDesc = getPropertyDescriptor(withO, name);
@@ -5609,7 +5660,7 @@ function mixin(what/*, ...withs */) {
 			if (!whatDesc || whatDesc.configurable)
 				// If what does not already have the property, or if what
 				// has the property and it's configurable, add it as is.
-				defineProperty(what, name, withDesc);
+				_defineProperty(what, name, withDesc);
 
 		});
 	}
@@ -5633,7 +5684,12 @@ function copy(what/*, ...withs */) {
 
 // We only want to define with own properties of the descriptor.
 function defineProperty(obj, name, desc) {
-	return _defineProperty(obj, name, own(desc));
+	if ('value' in desc && !hasOwn(desc, 'value')
+		|| 'get' in desc && !hasOwn(desc, 'get')
+		|| 'set' in desc && !hasOwn(desc, 'set')
+		|| 'writable' in desc && !hasOwn(desc, 'writable'))
+		desc = safeDescriptor(desc);
+	return _defineProperty(obj, name, desc);
 }
 
 var _Object = (function() {
@@ -5825,22 +5881,15 @@ function getTagOf(obj) {
 
 // TODO: Rename `dict`? Is this identical to ES6 `dict`?
 function own(obj) {
-	// Note: This function is not guaranteed to return a new object. It will return the object passed in
-	// if it has no prototype. This could cause confusion if it is forgotten and it is assumed to create
-	// a new object unconditionally. The current behavior is for performance reasons to prevent unnecessary
-	// object allocations.
-	// TODO: Consider whether this is a reasonable trade-off.
-
-	if (obj == null || getPrototypeOf(obj) == null)
-		return obj;
 
 	var O = Object(obj),
-		ret = create(null);
+		ret = create(null),
+		names = getOwnPropertyNames(O);
 
-	_forEach(getOwnPropertyNames(O), function(key) {
-		_defineProperty(ret, key,
-			_getOwnPropertyDescriptor(O, key));
-	});
+	// TODO: Will setting properties on Object.prototype break this? Since you could set a
+	// `get` property on the prototype, making a `get` property on a DataProperty...
+	for (var i = 0, name = names[0]; name = names[i], i < names.length; i++)
+		defineProperty(ret, name, _getOwnPropertyDescriptor(O, name));
 
 	return ret;
 
@@ -5850,7 +5899,7 @@ function getUncommonPropertyNames(from, compareWith) {
 	if (Object(from) !== from || Object(compareWith) !== compareWith)
 		throw new TypeError('getUncommonPropertyNames called on non-object.');
 	var namesMap = create(null);
-	return filter(_concatUncommonNames(from, compareWith),
+	return _filter(_concatUncommonNames(from, compareWith),
 		function(u) {
 			if (namesMap[u]) return false;
 			return namesMap[u] = true;
@@ -5867,8 +5916,9 @@ function _concatUncommonNames(from, compareWith) {
 
 // We want to make sure that only own properties of the descriptor are returned,
 // so that we can't be tricked.
+// TODO: Rename to indicate that this is slightly different from `Object.getOwnPropertyDescriptor`.
 function getOwnPropertyDescriptor(obj, name) {
-	return own(_getOwnPropertyDescriptor(obj, name));
+	return safeDescriptor(_getOwnPropertyDescriptor(obj, name));
 }
 
 function getPropertyDescriptor(obj, name) {
@@ -5882,18 +5932,20 @@ function getPropertyDescriptor(obj, name) {
 }
 
 function _items(obj) {
-	var items = [ ];
+	var items = create(null);
+	items.length = 0;
 	for (var key in obj)
 		push(items, [ key, obj[key] ]);
-	return items;
+	return ArrayFrom(items);
 }
 
 function _values(obj) {
-	var values = [ ];
-	forEach(keys(obj), function(key) {
+	var values = create(null);
+	values.length = 0;
+	_forEach(keys(obj), function(key) {
 			push(values, obj[key]);
 		});
-	return values;
+	return ArrayFrom(values);
 }
 
 function ReflectGetItems(obj) {
@@ -6201,7 +6253,7 @@ $Candy(WeakMap).construct = function(array) {
 
 								if (!oDesc || override && oDesc.configurable)
 									defineProperty(O, name,
-										getOwnPropertyDescriptor(module.instance, name));
+										_getOwnPropertyDescriptor(module.instance, name));
 
 							});
 					});
@@ -6268,7 +6320,7 @@ $Candy(WeakMap).construct = function(array) {
 
 										if (!bDesc || override)
 											defineProperty(what, name,
-												getOwnPropertyDescriptor(coatWith, name));
+												_getOwnPropertyDescriptor(coatWith, name));
 
 									});
 
@@ -6293,9 +6345,9 @@ $Candy(WeakMap).construct = function(array) {
 		var name = info.name,
 			module = candy[name] = info.module;
 		forEach(getOwnPropertyNames(module), function(name) {
-			var desc = getOwnPropertyDescriptor(module, name);
 			if (!hasOwn(candy, name))
-				defineProperty(candy, name, desc);
+				defineProperty(candy, name,
+					_getOwnPropertyDescriptor(module, name));
 		});
 	});
 

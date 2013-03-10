@@ -119,9 +119,9 @@ var Spawn = (function(Object, String, Error, TypeError) {
 								+ 'return (function " + name + "_(' + join(args, ',') + ') {'
 									+ 'return apply(wrapF, this, arguments);'
 								+ '});'
-							+ '})");'
+							+ '})")(wrapF, original, name, apply);'
 							+ 'wrapper.original = original;'
-							+ 'return wrapper(wrapF, original, name, apply);'
+							+ 'return wrapper;'
 						+ '})'
 					);
 
