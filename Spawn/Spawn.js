@@ -101,8 +101,10 @@ var Spawn = (function(Object, String, Error, TypeError) {
 				if (length > MAX_WRAPPER_LENGTH)
 					throw new Error('Maximum length allowed is ' + MAX_WRAPPER_LENGTH + ': ' + length);
 
-				var args = [ ],
+				var args = create(null),
 					generator = generators[length];
+
+				args.length = 0;
 
 				if (typeof f != 'function')
 					throw new TypeError('Function expected: ' + f);
@@ -148,6 +150,8 @@ var Spawn = (function(Object, String, Error, TypeError) {
 				} else {
 					args = slice(arguments);
 				}
+				// TODO: Array.prototype.reverse seems to use Put(), which may cause problems(?) if Array.prototype[index] is changed
+				// to a setter. Look into this and workarounds (possibly mention to ES-Discuss).
 				return apply(f, null, reverse(args));
 			});
 		},

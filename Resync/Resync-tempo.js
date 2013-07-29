@@ -236,6 +236,9 @@ var PromiseManager = (function() {
 		promises = SackFrom(promises);
 		promisesLength = promises.length >>> 0;
 
+		if (maintainOrder)
+			resolutionValues.length = promisesLength;
+
 		if (states === undefined) {
 			statesLength = 1;
 			proStates.fulfilled = true;
