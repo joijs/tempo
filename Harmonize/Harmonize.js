@@ -70,7 +70,7 @@
 		max = Math.max,
 
 		Secrets = (function() {
-			var $ = createSecret(),
+			var $ = Secret.create(),
 				SecretsMethods = {
 					get: function get(name) {
 						return this.store[name];
@@ -111,7 +111,7 @@
 		},
 
 		$$ = (function() {
-			var _$$ = createSecret();
+			var _$$ = Secret.create();
 			return function(/* symbolOperator, */obj, symbolName/*, value */) {
 				// This function should be possible to write in a way that would be
 				// compatible with ES6 symbols.
@@ -3591,7 +3591,7 @@ var StopIteration = (function() {
 
 	// Export createSecret.
 	if (typeof exports == 'object' && exports != null) {
-		exports.createSecret = createSecret;
+		exports.Secret = Secret;
 		exports.$$ = $$;
 	}
 
